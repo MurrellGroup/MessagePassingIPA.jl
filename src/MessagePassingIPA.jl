@@ -79,6 +79,21 @@ inverse_transform(rigid::RigidTransformation{T}, y::AbstractArray{T,3}) where {T
         y .- unsqueeze(rigid.translations, dims=2),
     )
 
+"""
+    compose(rigid1::RigidTransformation, rigid2::RigidTransformation)
+
+Compose two rigid transformations.
+"""
+function compose(
+    rigid1::RigidTransformation{T},
+    rigid2::RigidTransformation{T},
+) where {T}
+    rotations = batched_mul(rigid1.rotations, rigid2.rotations)
+    translations =
+        batched_vec(rigid1.rotations, rigid2.translations) + rigid1.translations
+    return RigidTransformation(rotations, translations)
+end
+
 
 # Invariant point attention
 # -------------------------
