@@ -233,6 +233,8 @@ struct GeometricVectorPerceptron
     vσ
 end
 
+Flux.@functor GeometricVectorPerceptron
+
 function GeometricVectorPerceptron((sin, sout), (vin, vout), sσ::Function = identity, vσ::Function = identity; bias = true)
     h = max(vin, vout)  # intermediate dimension for vector mapping
     W_h = randn(Float32, vin, h)
