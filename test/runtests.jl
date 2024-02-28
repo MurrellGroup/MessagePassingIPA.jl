@@ -1,5 +1,6 @@
-using MessagePassingIPA: RigidTransformation, InvariantPointAttention, transform, inverse_transform, compose, rigid_from_3points
+using MessagePassingIPA: RigidTransformation, InvariantPointAttention, transform, inverse_transform, compose, rigid_from_3points, GeometricVectorPerceptron
 using GraphNeuralNetworks: rand_graph
+using Flux: relu, batched_mul
 using Rotations: RotMatrix
 using Test
 
@@ -55,5 +56,31 @@ using Test
         x3 = R * x3 .+ t
         rigid2 = RigidTransformation(rigid_from_3points(x1, x2, x3)...)
         @test ipa(g, s, z, rigid1) ≈ ipa(g, s, z, rigid2)
+    end
+
+    @testset "GeometricVectorPerceptron" begin
+        sin, sout = 8, 12
+        vin, vout = 10, 14
+        σ = relu
+        gvp = GeometricVectorPerceptron(sin => sout, vin => vout, σ, σ)
+        n = 12
+        # scalar and vector feautres
+        s = randn(Float32, sin, n)
+        V = randn(Float32, 3, vin, n)
+
+        # check returned type and size
+        s′, V′ = gvp(s, V)
+        @show typeof(s′)
+        @show typeof(V′)
+        @test s′ isa Array{Float32, 2}
+        @test V′ isa Array{Float32, 3}
+        @test size(s′) == (sout, n)
+        @test size(V′) == (3, vout, n)
+
+        # check invariance and equivariance
+        R = rand(RotMatrix{3, Float32})
+        s″, V″ = gvp(s, batched_mul(R, V))
+        @test s″ ≈ s′
+        @test V″ ≈ batched_mul(R, V′)
     end
 end

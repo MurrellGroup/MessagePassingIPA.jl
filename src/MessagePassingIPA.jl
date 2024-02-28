@@ -226,4 +226,30 @@ end
 
 sumdrop(x; dims) = dropdims(sum(x; dims); dims)
 
+struct GeometricVectorPerceptron
+    W_h
+    W_μ
+    scalar::Dense
+    vσ
+end
+
+function GeometricVectorPerceptron((sin, sout), (vin, vout), sσ::Function = identity, vσ::Function = identity; bias = true)
+    h = max(vin, vout)  # intermediate dimension for vector mapping
+    W_h = randn(Float32, vin, h)
+    W_μ = randn(Float32, h, vout)
+    scalar = Dense(sin + h => sout, sσ; bias)
+    GeometricVectorPerceptron(W_h, W_μ, scalar, vσ)
+end
+
+function (gvp::GeometricVectorPerceptron)(s::AbstractArray, V::AbstractArray)
+    V_h = batched_mul(V, gvp.W_h)
+    s′ = gvp.scalar(cat(norm1(V_h), s, dims = 1))
+    V_μ = batched_mul(V_h, gvp.W_μ)
+    V′ = gvp.vσ(unsqueeze(norm1(V_μ), dims = 1)) .* V_μ
+    s′, V′
+end
+
+# L2 norm along the first dimension
+norm1(X) = dropdims(sqrt.(sum(abs2.(X), dims = 1)), dims = 1)
+
 end
