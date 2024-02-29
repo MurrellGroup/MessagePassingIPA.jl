@@ -82,5 +82,9 @@ using Test
         s″, V″ = gvp(s, batched_mul(R, V))
         @test s″ ≈ s′
         @test V″ ≈ batched_mul(R, V′)
+
+        # utility constructor where #inputs == #outputs
+        gvp = GeometricVectorPerceptron(12, 24, σ)
+        @test gvp isa GeometricVectorPerceptron
     end
 end

@@ -243,6 +243,9 @@ function GeometricVectorPerceptron((sin, sout), (vin, vout), sσ::Function = ide
     GeometricVectorPerceptron(W_h, W_μ, scalar, vσ)
 end
 
+GeometricVectorPerceptron(sin::Integer, vin::Integer, σ::Function = identity; bias = true) =
+    GeometricVectorPerceptron(sin => sin, vin => vin, σ, σ; bias)
+
 function (gvp::GeometricVectorPerceptron)(s::AbstractArray, V::AbstractArray)
     V_h = batched_mul(V, gvp.W_h)
     s′ = gvp.scalar(cat(norm1(V_h), s, dims = 1))
