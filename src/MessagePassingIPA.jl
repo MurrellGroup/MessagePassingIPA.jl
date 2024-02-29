@@ -226,6 +226,10 @@ end
 
 sumdrop(x; dims) = dropdims(sum(x; dims); dims)
 
+
+# Geometric vector perceptron
+# ---------------------------
+
 struct GeometricVectorPerceptron
     W_h
     W_μ
@@ -235,6 +239,32 @@ end
 
 Flux.@functor GeometricVectorPerceptron
 
+"""
+    GeometricVectorPerceptron(
+        sin => sout,
+        vin => vout,
+        sσ = identity,
+        vσ = identity;
+        bias = true
+    )
+
+Create a geometric vector perceptron layer.
+
+This layer takes a pair of scalar and vector feature arrays that have the size
+of `sin × batchsize` and `3 × vin × batchsize`, respectively, and returns a pair
+of scalar and vector feature arrays that have the size of `sout × batchsize` and
+`3 × vout × batchsize`, respectively. The scalar features are invariant whereas
+the vector features are equivariant under any rotation and reflection.
+
+# Arguments
+- `sin => sout`: scalar input and output dimensions
+- `vin => vout`: vector input and output dimensions
+- `sσ`: scalar nonlinearlity
+- `vσ`: vector nonlinearlity
+- `bias`: includes a bias term iff `bias = true``
+
+Jing, Bowen, et al. "Learning from protein structure with geometric vector perceptrons." arXiv preprint arXiv:2009.01411 (2020).
+"""
 function GeometricVectorPerceptron((sin, sout), (vin, vout), sσ::Function = identity, vσ::Function = identity; bias = true)
     h = max(vin, vout)  # intermediate dimension for vector mapping
     W_h = randn(Float32, vin, h)
@@ -246,13 +276,19 @@ end
 GeometricVectorPerceptron(sin::Integer, vin::Integer, σ::Function = identity; bias = true) =
     GeometricVectorPerceptron(sin => sin, vin => vin, σ, σ; bias)
 
-function (gvp::GeometricVectorPerceptron)(s::AbstractArray, V::AbstractArray)
+# s: scalar features (sin × batch)
+# V: vector feautres (3 × vin × batch)
+function (gvp::GeometricVectorPerceptron)(s::AbstractArray{T, 2}, V::AbstractArray{T, 3}) where T
+    @assert size(V, 1) == 3
     V_h = batched_mul(V, gvp.W_h)
     s′ = gvp.scalar(cat(norm1(V_h), s, dims = 1))
     V_μ = batched_mul(V_h, gvp.W_μ)
     V′ = gvp.vσ(unsqueeze(norm1(V_μ), dims = 1)) .* V_μ
     s′, V′
 end
+
+# This makes chaining by Flux.Chain easier.
+(gvp::GeometricVectorPerceptron)((s, V)::Tuple{AbstractArray{T, 2}, AbstractArray{T, 3}}) where T  = gvp(s, V)
 
 # L2 norm along the first dimension
 norm1(X) = dropdims(sqrt.(sum(abs2.(X), dims = 1)), dims = 1)
