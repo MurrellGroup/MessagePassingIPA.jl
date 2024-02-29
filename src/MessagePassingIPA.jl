@@ -287,10 +287,10 @@ function (gvp::GeometricVectorPerceptron)(s::AbstractArray{T, 2}, V::AbstractArr
     s′, V′
 end
 
-# This makes chaining by Flux.Chain easier.
+# This makes chaining by Flux's Chain easier.
 (gvp::GeometricVectorPerceptron)((s, V)::Tuple{AbstractArray{T, 2}, AbstractArray{T, 3}}) where T  = gvp(s, V)
 
 # L2 norm along the first dimension
-norm1(X) = dropdims(sqrt.(sum(abs2.(X), dims = 1)), dims = 1)
+norm1(X) = dropdims(sqrt.(sum(abs2, X, dims = 1)), dims = 1)
 
 end
