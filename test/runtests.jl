@@ -1,7 +1,8 @@
-using MessagePassingIPA: RigidTransformation, InvariantPointAttention, transform, inverse_transform, compose, rigid_from_3points, GeometricVectorPerceptron
+using MessagePassingIPA: RigidTransformation, InvariantPointAttention, transform, inverse_transform, compose, rigid_from_3points, GeometricVectorPerceptron, VectorNorm
 using GraphNeuralNetworks: rand_graph
 using Flux: relu, batched_mul
 using Rotations: RotMatrix
+using Statistics: mean
 using Test
 
 @testset "MessagePassingIPA.jl" begin
@@ -70,8 +71,6 @@ using Test
 
         # check returned type and size
         s′, V′ = gvp(s, V)
-        @show typeof(s′)
-        @show typeof(V′)
         @test s′ isa Array{Float32, 2}
         @test V′ isa Array{Float32, 3}
         @test size(s′) == (sout, n)
@@ -86,5 +85,14 @@ using Test
         # utility constructor where #inputs == #outputs
         gvp = GeometricVectorPerceptron(12, 24, σ)
         @test gvp isa GeometricVectorPerceptron
+    end
+
+    @testset "VectorNorm" begin
+        norm = VectorNorm()
+        V = randn(Float32, 3, 8, 128)
+        @test norm(V) isa Array{Float32, 3}
+        @test size(norm(V)) == size(V)
+        @test norm(V) ≈ norm(100 * V)
+        @test all(sqrt.(mean(sum(abs2, norm(V), dims = 1), dims = 2)) .≈ 1)
     end
 end

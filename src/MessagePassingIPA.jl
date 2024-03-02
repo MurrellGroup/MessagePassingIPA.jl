@@ -3,6 +3,7 @@ module MessagePassingIPA
 using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
+using Statistics: mean
 
 # Algorithm 21 (x1: N, x2: Ca, x3: C)
 function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::AbstractVector)
@@ -281,16 +282,27 @@ GeometricVectorPerceptron(sin::Integer, vin::Integer, σ::Function = identity; b
 function (gvp::GeometricVectorPerceptron)(s::AbstractArray{T, 2}, V::AbstractArray{T, 3}) where T
     @assert size(V, 1) == 3
     V_h = batched_mul(V, gvp.W_h)
-    s′ = gvp.scalar(cat(norm1(V_h), s, dims = 1))
+    s′ = gvp.scalar(cat(norm1drop(V_h), s, dims = 1))
     V_μ = batched_mul(V_h, gvp.W_μ)
-    V′ = gvp.vσ(unsqueeze(norm1(V_μ), dims = 1)) .* V_μ
+    V′ = gvp.vσ(unsqueeze(norm1drop(V_μ), dims = 1)) .* V_μ
     s′, V′
 end
 
 # This makes chaining by Flux's Chain easier.
 (gvp::GeometricVectorPerceptron)((s, V)::Tuple{AbstractArray{T, 2}, AbstractArray{T, 3}}) where T  = gvp(s, V)
 
+# Normalization for vector features
+struct VectorNorm
+    #eps::Float32
+end
+
+function (norm::VectorNorm)(V::AbstractArray{T, 3}) where T
+    @assert size(V, 1) == 3
+    V ./ sqrt.(mean(sum(abs2, V, dims = 1), dims = 2))
+end
+
 # L2 norm along the first dimension
-norm1(X) = dropdims(sqrt.(sum(abs2, X, dims = 1)), dims = 1)
+norm1(X) = sqrt.(sum(abs2, X, dims = 1))
+norm1drop(X) = dropdims(norm1(X), dims = 1)
 
 end
