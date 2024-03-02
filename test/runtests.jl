@@ -89,10 +89,14 @@ using Test
 
     @testset "VectorNorm" begin
         norm = VectorNorm()
-        V = randn(Float32, 3, 8, 128)
+        V = randn(Float32, 3, 5, 10)
         @test norm(V) isa Array{Float32, 3}
         @test size(norm(V)) == size(V)
         @test norm(V) ≈ norm(100 * V)
         @test all(sqrt.(mean(sum(abs2, norm(V), dims = 1), dims = 2)) .≈ 1)
+
+        # zero values
+        V = zeros(Float32, 3, 5, 10)
+        @test all(!isnan, norm(V))
     end
 end

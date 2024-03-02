@@ -293,12 +293,14 @@ end
 
 # Normalization for vector features
 struct VectorNorm
-    #eps::Float32
+    ϵ::Float32
 end
+
+VectorNorm(; eps::Real = 1f-5) = VectorNorm(eps)
 
 function (norm::VectorNorm)(V::AbstractArray{T, 3}) where T
     @assert size(V, 1) == 3
-    V ./ sqrt.(mean(sum(abs2, V, dims = 1), dims = 2))
+    V ./ (sqrt.(mean(sum(abs2, V, dims = 1), dims = 2)) .+ norm.ϵ)
 end
 
 # L2 norm along the first dimension
