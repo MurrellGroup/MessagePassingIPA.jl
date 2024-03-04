@@ -266,11 +266,18 @@ the vector features are equivariant under any rotation and reflection.
 
 Jing, Bowen, et al. "Learning from protein structure with geometric vector perceptrons." arXiv preprint arXiv:2009.01411 (2020).
 """
-function GeometricVectorPerceptron((sin, sout), (vin, vout), sσ::Function = identity, vσ::Function = identity; bias::Bool = true)
+function GeometricVectorPerceptron(
+    (sin, sout),
+    (vin, vout),
+    sσ::Function = identity,
+    vσ::Function = identity;
+    bias::Bool = true,
+    init = Flux.glorot_uniform
+)
     h = max(vin, vout)  # intermediate dimension for vector mapping
-    W_h = randn(Float32, vin, h)
-    W_μ = randn(Float32, h, vout)
-    scalar = Dense(sin + h => sout, sσ; bias)
+    W_h = init(vin, h)
+    W_μ = init(h, vout)
+    scalar = Dense(sin + h => sout, sσ; bias, init)
     GeometricVectorPerceptron(W_h, W_μ, scalar, vσ)
 end
 
