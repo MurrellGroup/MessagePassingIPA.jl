@@ -232,10 +232,10 @@ sumdrop(x; dims) = dropdims(sum(x; dims); dims)
 # ---------------------------
 
 struct GeometricVectorPerceptron
-    W_h
-    W_μ
+    W_h::AbstractMatrix
+    W_μ::AbstractMatrix
     scalar::Dense
-    vσ
+    vσ::Function
 end
 
 Flux.@functor GeometricVectorPerceptron
