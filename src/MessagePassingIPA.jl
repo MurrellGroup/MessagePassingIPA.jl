@@ -1,6 +1,6 @@
 module MessagePassingIPA
 
-using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
+using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus, sigmoid
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
 using Statistics: mean
@@ -235,7 +235,9 @@ struct GeometricVectorPerceptron
     W_h::AbstractMatrix
     W_μ::AbstractMatrix
     scalar::Dense
+    sσ::Function
     vσ::Function
+    vgate::Union{Dense, Nothing}
 end
 
 Flux.@functor GeometricVectorPerceptron
@@ -267,13 +269,18 @@ function GeometricVectorPerceptron(
     ((sin, vin), (sout, vout)),
     (sσ, vσ) = (identity, identity);
     bias::Bool = true,
+    vector_gate::Bool = false,
     init = Flux.glorot_uniform
 )
     h = max(vin, vout)  # intermediate dimension for vector mapping
     W_h = init(vin, h)
     W_μ = init(h, vout)
-    scalar = Dense(sin + h => sout, sσ; bias, init)
-    GeometricVectorPerceptron(W_h, W_μ, scalar, vσ)
+    scalar = Dense(sin + h => sout; bias, init)
+    vgate = nothing
+    if vector_gate
+        vgate = Dense(sout => vout, sigmoid; init)
+    end
+    GeometricVectorPerceptron(W_h, W_μ, scalar, sσ, vσ, vgate)
 end
 
 # s: scalar features (sin × batch)
@@ -281,9 +288,14 @@ end
 function (gvp::GeometricVectorPerceptron)(s::AbstractArray{T, 2}, V::AbstractArray{T, 3}) where T
     @assert size(V, 1) == 3
     V_h = batched_mul(V, gvp.W_h)
-    s′ = gvp.scalar(cat(norm1drop(V_h), s, dims = 1))
+    s_m = gvp.scalar(cat(norm1drop(V_h), s, dims = 1))
     V_μ = batched_mul(V_h, gvp.W_μ)
-    V′ = gvp.vσ(unsqueeze(norm1drop(V_μ), dims = 1)) .* V_μ
+    s′ = gvp.sσ.(s_m)
+    if gvp.vgate === nothing
+        V′ = gvp.vσ.(unsqueeze(norm1drop(V_μ), dims = 1)) .* V_μ
+    else
+        V′ = unsqueeze(gvp.vgate(gvp.vσ.(s_m)), dims = 1) .* V_μ
+    end
     s′, V′
 end
 

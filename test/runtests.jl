@@ -60,26 +60,33 @@ using Test
     end
 
     @testset "GeometricVectorPerceptron" begin
+        # scalar and vector feautres
+        n = 12
         sin, sout = 8, 12
         vin, vout = 10, 14
-        gvp = GeometricVectorPerceptron((sin, vin) => (sout, vout), (relu, identity))
-        n = 12
-        # scalar and vector feautres
         s = randn(Float32, sin, n)
         V = randn(Float32, 3, vin, n)
 
-        # check returned type and size
-        s′, V′ = gvp(s, V)
-        @test s′ isa Array{Float32, 2}
-        @test V′ isa Array{Float32, 3}
-        @test size(s′) == (sout, n)
-        @test size(V′) == (3, vout, n)
+        for vector_gate in [false, true]
+            gvp = GeometricVectorPerceptron(
+                (sin, vin) => (sout, vout),
+                (relu, identity);
+                vector_gate
+            )
 
-        # check invariance and equivariance
-        R = rand(RotMatrix{3, Float32})
-        s″, V″ = gvp(s, batched_mul(R, V))
-        @test s″ ≈ s′
-        @test V″ ≈ batched_mul(R, V′)
+            # check returned type and size
+            s′, V′ = gvp(s, V)
+            @test s′ isa Array{Float32, 2}
+            @test V′ isa Array{Float32, 3}
+            @test size(s′) == (sout, n)
+            @test size(V′) == (3, vout, n)
+
+            # check invariance and equivariance
+            R = rand(RotMatrix{3, Float32})
+            s″, V″ = gvp(s, batched_mul(R, V))
+            @test s″ ≈ s′
+            @test V″ ≈ batched_mul(R, V′)
+        end
     end
 
     @testset "VectorNorm" begin
