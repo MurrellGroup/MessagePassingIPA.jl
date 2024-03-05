@@ -242,10 +242,8 @@ Flux.@functor GeometricVectorPerceptron
 
 """
     GeometricVectorPerceptron(
-        sin => sout,
-        vin => vout,
-        sσ = identity,
-        vσ = identity;
+        (sin, vin) => (sout, vout),
+        (sσ, vσ) = (identity, identity);
         bias = true
     )
 
@@ -258,19 +256,16 @@ of scalar and vector feature arrays that have the size of `sout × batchsize` an
 the vector features are equivariant under any rotation and reflection.
 
 # Arguments
-- `sin => sout`: scalar input and output dimensions
-- `vin => vout`: vector input and output dimensions
-- `sσ`: scalar nonlinearlity
-- `vσ`: vector nonlinearlity
-- `bias`: includes a bias term iff `bias = true``
+- `sin`, `vin`: scalar and vector input dimensions
+- `sout`, `vout`: scalar and vector output dimensions
+- `sσ`, `vσ`: scalar and vector nonlinearlities
+- `bias`: includes a bias term iff `bias = true`
 
 Jing, Bowen, et al. "Learning from protein structure with geometric vector perceptrons." arXiv preprint arXiv:2009.01411 (2020).
 """
 function GeometricVectorPerceptron(
-    (sin, sout),
-    (vin, vout),
-    sσ::Function = identity,
-    vσ::Function = identity;
+    ((sin, vin), (sout, vout)),
+    (sσ, vσ) = (identity, identity);
     bias::Bool = true,
     init = Flux.glorot_uniform
 )
@@ -280,9 +275,6 @@ function GeometricVectorPerceptron(
     scalar = Dense(sin + h => sout, sσ; bias, init)
     GeometricVectorPerceptron(W_h, W_μ, scalar, vσ)
 end
-
-GeometricVectorPerceptron(sin::Integer, vin::Integer, σ::Function = identity; bias::Bool = true) =
-    GeometricVectorPerceptron(sin => sin, vin => vin, σ, σ; bias)
 
 # s: scalar features (sin × batch)
 # V: vector feautres (3 × vin × batch)

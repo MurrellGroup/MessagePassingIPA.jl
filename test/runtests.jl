@@ -62,8 +62,7 @@ using Test
     @testset "GeometricVectorPerceptron" begin
         sin, sout = 8, 12
         vin, vout = 10, 14
-        σ = relu
-        gvp = GeometricVectorPerceptron(sin => sout, vin => vout, σ, σ)
+        gvp = GeometricVectorPerceptron((sin, vin) => (sout, vout), (relu, identity))
         n = 12
         # scalar and vector feautres
         s = randn(Float32, sin, n)
@@ -81,10 +80,6 @@ using Test
         s″, V″ = gvp(s, batched_mul(R, V))
         @test s″ ≈ s′
         @test V″ ≈ batched_mul(R, V′)
-
-        # utility constructor where #inputs == #outputs
-        gvp = GeometricVectorPerceptron(12, 24, σ)
-        @test gvp isa GeometricVectorPerceptron
     end
 
     @testset "VectorNorm" begin
