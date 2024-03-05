@@ -246,7 +246,8 @@ Flux.@functor GeometricVectorPerceptron
     GeometricVectorPerceptron(
         (sin, vin) => (sout, vout),
         (sσ, vσ) = (identity, identity);
-        bias = true
+        bias = true,
+        vector_gate = false
     )
 
 Create a geometric vector perceptron layer.
@@ -262,8 +263,11 @@ the vector features are equivariant under any rotation and reflection.
 - `sout`, `vout`: scalar and vector output dimensions
 - `sσ`, `vσ`: scalar and vector nonlinearlities
 - `bias`: includes a bias term iff `bias = true`
+- `vector_gate`: includes vector gating iff `vector_gate = true`
 
-Jing, Bowen, et al. "Learning from protein structure with geometric vector perceptrons." arXiv preprint arXiv:2009.01411 (2020).
+# References
+- Jing, Bowen, et al. "Learning from protein structure with geometric vector perceptrons." arXiv preprint arXiv:2009.01411 (2020).
+- Jing, Bowen, et al. "Equivariant graph neural networks for 3d macromolecular structure." arXiv preprint arXiv:2106.03843 (2021).
 """
 function GeometricVectorPerceptron(
     ((sin, vin), (sout, vout)),
