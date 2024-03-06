@@ -1,4 +1,7 @@
-using MessagePassingIPA: RigidTransformation, InvariantPointAttention, transform, inverse_transform, compose, rigid_from_3points, GeometricVectorPerceptron, VectorNorm
+using MessagePassingIPA:
+    RigidTransformation, InvariantPointAttention,
+    transform, inverse_transform, compose, rigid_from_3points,
+    GeometricVectorPerceptron, GeometricVectorPerceptronGNN, VectorNorm
 using GraphNeuralNetworks: rand_graph
 using Flux: relu, batched_mul
 using Rotations: RotMatrix
@@ -87,6 +90,24 @@ using Test
             @test s″ ≈ s′
             @test V″ ≈ batched_mul(R, V′)
         end
+    end
+
+    @testset "GeometricVectorPerceptronGNN" begin
+        n = 10
+        m = 8n
+        g = rand_graph(n, m)
+
+        sn, vn = 8, 12
+        se, ve = 10, 14
+        gnn = GeometricVectorPerceptronGNN((sn, vn), (se, ve))
+
+        node_embeddings = randn(Float32, sn, n), randn(Float32, 3, vn, n)
+        edge_embeddings = randn(Float32, se, m), randn(Float32, 3, ve, m)
+        node_embeddings = gnn(g, node_embeddings, edge_embeddings)
+        @test node_embeddings isa Tuple{Array{Float32, 2}, Array{Float32, 3}}
+        s, v = node_embeddings
+        @test size(s) == (sn, n)
+        @test size(v) == (3, vn, n)
     end
 
     @testset "VectorNorm" begin

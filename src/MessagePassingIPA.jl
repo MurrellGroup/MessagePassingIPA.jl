@@ -1,6 +1,6 @@
 module MessagePassingIPA
 
-using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus, sigmoid
+using Flux: Flux, Dense, Chain, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus, sigmoid, relu
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
 using Statistics: mean
@@ -305,6 +305,70 @@ end
 
 # This makes chaining by Flux's Chain easier.
 (gvp::GeometricVectorPerceptron)((s, V)::Tuple{AbstractArray{T, 2}, AbstractArray{T, 3}}) where T  = gvp(s, V)
+
+struct GeometricVectorPerceptronGNN
+    gvpstack::Chain
+end
+
+"""
+    GeometricVectorPerceptronGNN(
+        (sn, vn),
+        (se, ve),
+        (sσ, vσ) = (relu, relu);
+        n_hidden_layers = 1,
+        vector_gate = false,
+    )
+
+Create a graph neural network with geometric vector perceptrons.
+
+This layer first concatenates the node and the edge features and then propagates
+them over the graph. It returns a pair of scalr and vector feature arrays that
+have the same size of input node features.
+
+# Arguments
+- `sn`, `vn`: scalar and vector dimensions of node features
+- `se`, `ve`: scalar and vector dimensions of edge features
+- `sσ`, `sσ`: scalar and vector nonlinearlities
+- `vector_gate`: includes vector gating iff `vector_gate = true`
+- `n_intermediate_layers`: number of intermediate layers between the input and the output geometric vector perceptrons
+"""
+function GeometricVectorPerceptronGNN(
+    (sn, vn)::Tuple{Integer, Integer},
+    (se, ve)::Tuple{Integer, Integer},
+    (sσ, vσ)::Tuple{Function, Function} = (relu, relu);
+    vector_gate::Bool = false,
+    n_intermediate_layers::Integer = 1,
+)
+    gvpstack = Chain(
+        # input layer
+        GeometricVectorPerceptron((sn + se, vn + ve) => (sn, vn), (sσ, vσ); vector_gate),
+        # intermediate layers
+        [
+            GeometricVectorPerceptron((sn, vn) => (sn, vn), (sσ, vσ); vector_gate)
+            for _ in 1:n_intermediate_layers
+        ]...,
+        # output layers
+        GeometricVectorPerceptron((sn, vn) => (sn, vn)),
+    )
+    GeometricVectorPerceptronGNN(gvpstack)
+end
+
+function (gnn::GeometricVectorPerceptronGNN)(
+    g::GNNGraph,
+    (sn, vn)::Tuple{<:AbstractArray{T, 2}, <:AbstractArray{T, 3}},
+    (se, ve)::Tuple{<:AbstractArray{T, 2}, <:AbstractArray{T, 3}},
+) where T
+    # run message passing
+    function message(_, xj, e)
+        s = cat(xj.s, e.s, dims = 1)
+        v = cat(xj.v, e.v, dims = 2)
+        gnn.gvpstack((s, v))
+    end
+    xj = (s = sn, v = vn)
+    e = (s = se, v = ve)
+    msgs = apply_edges(message, g; xj, e)
+    aggregate_neighbors(g, mean, msgs)  # return (s, v)
+end
 
 # Normalization for vector features
 struct VectorNorm
