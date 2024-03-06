@@ -315,8 +315,8 @@ end
         (sn, vn),
         (se, ve),
         (sσ, vσ) = (relu, relu);
-        n_hidden_layers = 1,
         vector_gate = false,
+        n_intermediate_layers = 1,
     )
 
 Create a graph neural network with geometric vector perceptrons.
