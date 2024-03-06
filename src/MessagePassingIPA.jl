@@ -328,7 +328,7 @@ have the same size of input node features.
 # Arguments
 - `sn`, `vn`: scalar and vector dimensions of node features
 - `se`, `ve`: scalar and vector dimensions of edge features
-- `sσ`, `sσ`: scalar and vector nonlinearlities
+- `sσ`, `vσ`: scalar and vector nonlinearlities
 - `vector_gate`: includes vector gating iff `vector_gate = true`
 - `n_intermediate_layers`: number of intermediate layers between the input and the output geometric vector perceptrons
 """
