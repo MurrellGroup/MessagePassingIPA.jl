@@ -100,14 +100,23 @@ using Test
         sn, vn = 8, 12
         se, ve = 10, 14
         gnn = GeometricVectorPerceptronGNN((sn, vn), (se, ve))
-
         node_embeddings = randn(Float32, sn, n), randn(Float32, 3, vn, n)
         edge_embeddings = randn(Float32, se, m), randn(Float32, 3, ve, m)
-        node_embeddings = gnn(g, node_embeddings, edge_embeddings)
-        @test node_embeddings isa Tuple{Array{Float32, 2}, Array{Float32, 3}}
-        s, v = node_embeddings
-        @test size(s) == (sn, n)
-        @test size(v) == (3, vn, n)
+
+        # check returned type and size
+        results = gnn(g, node_embeddings, edge_embeddings)
+        @test results isa Tuple{Array{Float32, 2}, Array{Float32, 3}}
+        s′, v′ = results
+        @test size(s′) == (sn, n)
+        @test size(v′) == (3, vn, n)
+
+        # check invariance and equivariance
+        R = rand(RotMatrix{3, Float32})
+        node_embeddings = (node_embeddings[1], batched_mul(R, node_embeddings[2]))
+        edge_embeddings = (edge_embeddings[1], batched_mul(R, edge_embeddings[2]))
+        s″, v″ = gnn(g, node_embeddings, edge_embeddings)
+        @test s″ ≈ s′
+        @test v″ ≈ batched_mul(R, v′)
     end
 
     @testset "VectorNorm" begin
