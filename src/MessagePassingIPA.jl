@@ -310,6 +310,8 @@ struct GeometricVectorPerceptronGNN
     gvpstack::Chain
 end
 
+Flux.@functor GeometricVectorPerceptronGNN
+
 """
     GeometricVectorPerceptronGNN(
         (sn, vn),
