@@ -1,8 +1,9 @@
 module MessagePassingIPA
 
-using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
+using Flux: Flux, Dense, Chain, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus, sigmoid, relu
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
+using Statistics: mean
 
 # Algorithm 21 (x1: N, x2: Ca, x3: C)
 function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::AbstractVector)
@@ -225,5 +226,166 @@ function (ipa::InvariantPointAttention)(
 end
 
 sumdrop(x; dims) = dropdims(sum(x; dims); dims)
+
+
+# Geometric vector perceptron
+# ---------------------------
+
+struct GeometricVectorPerceptron
+    W_h::AbstractMatrix
+    W_μ::AbstractMatrix
+    scalar::Dense
+    sσ::Function
+    vσ::Function
+    vgate::Union{Dense, Nothing}
+end
+
+Flux.@functor GeometricVectorPerceptron
+
+"""
+    GeometricVectorPerceptron(
+        (sin, vin) => (sout, vout),
+        (sσ, vσ) = (identity, identity);
+        bias = true,
+        vector_gate = false
+    )
+
+Create a geometric vector perceptron layer.
+
+This layer takes a pair of scalar and vector feature arrays that have the size
+of `sin × batchsize` and `3 × vin × batchsize`, respectively, and returns a pair
+of scalar and vector feature arrays that have the size of `sout × batchsize` and
+`3 × vout × batchsize`, respectively. The scalar features are invariant whereas
+the vector features are equivariant under any rotation and reflection.
+
+# Arguments
+- `sin`, `vin`: scalar and vector input dimensions
+- `sout`, `vout`: scalar and vector output dimensions
+- `sσ`, `vσ`: scalar and vector nonlinearlities
+- `bias`: includes a bias term iff `bias = true`
+- `vector_gate`: includes vector gating iff `vector_gate = true`
+
+# References
+- Jing, Bowen, et al. "Learning from protein structure with geometric vector perceptrons." arXiv preprint arXiv:2009.01411 (2020).
+- Jing, Bowen, et al. "Equivariant graph neural networks for 3d macromolecular structure." arXiv preprint arXiv:2106.03843 (2021).
+"""
+function GeometricVectorPerceptron(
+    ((sin, vin), (sout, vout)),
+    (sσ, vσ) = (identity, identity);
+    bias::Bool = true,
+    vector_gate::Bool = false,
+    init = Flux.glorot_uniform
+)
+    h = max(vin, vout)  # intermediate dimension for vector mapping
+    W_h = init(vin, h)
+    W_μ = init(h, vout)
+    scalar = Dense(sin + h => sout; bias, init)
+    vgate = nothing
+    if vector_gate
+        vgate = Dense(sout => vout, sigmoid; init)
+    end
+    GeometricVectorPerceptron(W_h, W_μ, scalar, sσ, vσ, vgate)
+end
+
+# s: scalar features (sin × batch)
+# V: vector feautres (3 × vin × batch)
+function (gvp::GeometricVectorPerceptron)(s::AbstractArray{T, 2}, V::AbstractArray{T, 3}) where T
+    @assert size(V, 1) == 3
+    V_h = batched_mul(V, gvp.W_h)
+    s_m = gvp.scalar(cat(norm1drop(V_h), s, dims = 1))
+    V_μ = batched_mul(V_h, gvp.W_μ)
+    s′ = gvp.sσ.(s_m)
+    if gvp.vgate === nothing
+        V′ = gvp.vσ.(unsqueeze(norm1drop(V_μ), dims = 1)) .* V_μ
+    else
+        V′ = unsqueeze(gvp.vgate(gvp.vσ.(s_m)), dims = 1) .* V_μ
+    end
+    s′, V′
+end
+
+# This makes chaining by Flux's Chain easier.
+(gvp::GeometricVectorPerceptron)((s, V)::Tuple{AbstractArray{T, 2}, AbstractArray{T, 3}}) where T  = gvp(s, V)
+
+struct GeometricVectorPerceptronGNN
+    gvpstack::Chain
+end
+
+Flux.@functor GeometricVectorPerceptronGNN
+
+"""
+    GeometricVectorPerceptronGNN(
+        (sn, vn),
+        (se, ve),
+        (sσ, vσ) = (relu, relu);
+        vector_gate = false,
+        n_intermediate_layers = 1,
+    )
+
+Create a graph neural network with geometric vector perceptrons.
+
+This layer first concatenates the node and the edge features and then propagates
+them over the graph. It returns a pair of scalr and vector feature arrays that
+have the same size of input node features.
+
+# Arguments
+- `sn`, `vn`: scalar and vector dimensions of node features
+- `se`, `ve`: scalar and vector dimensions of edge features
+- `sσ`, `vσ`: scalar and vector nonlinearlities
+- `vector_gate`: includes vector gating iff `vector_gate = true`
+- `n_intermediate_layers`: number of intermediate layers between the input and the output geometric vector perceptrons
+"""
+function GeometricVectorPerceptronGNN(
+    (sn, vn)::Tuple{Integer, Integer},
+    (se, ve)::Tuple{Integer, Integer},
+    (sσ, vσ)::Tuple{Function, Function} = (relu, relu);
+    vector_gate::Bool = false,
+    n_intermediate_layers::Integer = 1,
+)
+    gvpstack = Chain(
+        # input layer
+        GeometricVectorPerceptron((2sn + se, 2vn + ve) => (sn, vn), (sσ, vσ); vector_gate),
+        # intermediate layers
+        [
+            GeometricVectorPerceptron((sn, vn) => (sn, vn), (sσ, vσ); vector_gate)
+            for _ in 1:n_intermediate_layers
+        ]...,
+        # output layers
+        GeometricVectorPerceptron((sn, vn) => (sn, vn)),
+    )
+    GeometricVectorPerceptronGNN(gvpstack)
+end
+
+function (gnn::GeometricVectorPerceptronGNN)(
+    g::GNNGraph,
+    (sn, vn)::Tuple{<:AbstractArray{T, 2}, <:AbstractArray{T, 3}},
+    (se, ve)::Tuple{<:AbstractArray{T, 2}, <:AbstractArray{T, 3}},
+) where T
+    # run message passing
+    function message(xi, xj, e)
+        s = cat(xi.s, xj.s, e.s, dims = 1)
+        v = cat(xi.v, xj.v, e.v, dims = 2)
+        gnn.gvpstack((s, v))
+    end
+    xi = xj = (s = sn, v = vn)
+    e = (s = se, v = ve)
+    msgs = apply_edges(message, g; xi, xj, e)
+    aggregate_neighbors(g, mean, msgs)  # return (s, v)
+end
+
+# Normalization for vector features
+struct VectorNorm
+    ϵ::Float32
+end
+
+VectorNorm(; eps::Real = 1f-5) = VectorNorm(eps)
+
+function (norm::VectorNorm)(V::AbstractArray{T, 3}) where T
+    @assert size(V, 1) == 3
+    V ./ (sqrt.(mean(sum(abs2, V, dims = 1), dims = 2)) .+ norm.ϵ)
+end
+
+# L2 norm along the first dimension
+norm1(X) = sqrt.(sum(abs2, X, dims = 1))
+norm1drop(X) = dropdims(norm1(X), dims = 1)
 
 end
