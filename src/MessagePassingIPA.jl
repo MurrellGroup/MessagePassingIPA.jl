@@ -3,6 +3,7 @@ module MessagePassingIPA
 using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
+using Statistics: mean
 
 # Algorithm 21 (x1: N, x2: Ca, x3: C)
 function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::AbstractVector)
@@ -45,6 +46,8 @@ struct RigidTransformation{T,A<:AbstractArray{T,3},B<:AbstractArray{T,2}}
     translations::B  # (3, N)
 end
 
+nresidues(rigid::RigidTransformation) = size(rigid.translations, 2)
+
 """
     RigidTransformation(rotations, translations)
 
@@ -67,6 +70,9 @@ Apply transformation `rigid` to `x`.
 transform(rigid::RigidTransformation{T}, x::AbstractArray{T,3}) where {T} =
     batched_mul(rigid.rotations, x) .+ unsqueeze(rigid.translations, dims=2)
 
+transform(rigid::RigidTransformation{T}, x::AbstractArray{T, 4}) where T =
+    reshape(transform(rigid, reshape(x, 3, :, nresidues(rigid))), size(x))
+
 # y: (3, ?, N)
 """
     inverse_transform(rigid::RigidTransformation, y::AbstractArray)
@@ -78,6 +84,9 @@ inverse_transform(rigid::RigidTransformation{T}, y::AbstractArray{T,3}) where {T
         batched_transpose(rigid.rotations),
         y .- unsqueeze(rigid.translations, dims=2),
     )
+
+inverse_transform(rigid::RigidTransformation{T}, x::AbstractArray{T, 4}) where T =
+    reshape(inverse_transform(rigid, reshape(x, 3, :, nresidues(rigid))), size(x))
 
 """
     compose(rigid1::RigidTransformation, rigid2::RigidTransformation)
@@ -214,6 +223,61 @@ function (ipa::InvariantPointAttention)(
     # return the final output
     out = vcat(flatten.((out_pairs, out_nodes, out_points, out_points_norm))...)
     return ipa.map_final(out)
+end
+
+
+# Invariant point gate
+# --------------------
+
+struct InvariantPointGate
+    # hyperparameters
+    n_heads::Int
+    c::Int
+    n_point_values::Int
+
+    # trainable layers
+    map_points::Dense
+    map_final::Dense
+end
+
+Flux.@layer InvariantPointGate
+
+function InvariantPointGate(
+    n_dims_s::Integer,
+    n_dims_z::Integer;
+    n_heads::Integer = 12,
+    c::Integer = 6,
+    n_point_values::Integer = 8
+)
+    init = Flux.kaiming_uniform(gain = 1.0)
+    map_points = Dense(n_dims_s => 3 * n_heads * n_point_values; bias = false, init)
+    map_final = Dense(n_heads * n_point_values * 3 => n_dims_s; bias = true, init)
+    InvariantPointGate(
+        n_heads,
+        c,
+        n_point_values,
+        map_points,
+        map_final,
+    )
+end
+
+function (ipg::InvariantPointGate)(
+    g::GNNGraph,
+    s::AbstractMatrix,
+    z::AbstractMatrix,
+    rigid::RigidTransformation
+)
+    (; n_heads, c, n_point_values) = ipg
+    points = transform(rigid, reshape(ipg.map_points(s), 3, n_heads, n_point_values, :))
+    function message(xi, xj, e)
+        # TODO: some gating here
+        xj
+    end
+    xi = xj = points
+    e = nothing
+    msgs = apply_edges(message, g; xi, xj, e)
+    out_points = inverse_transform(rigid, aggregate_neighbors(g, mean, msgs))
+    ipg.map_final(flatten(out_points))
 end
 
 sumdrop(x; dims) = dropdims(sum(x; dims); dims)
