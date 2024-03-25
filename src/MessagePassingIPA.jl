@@ -1,6 +1,6 @@
 module MessagePassingIPA
 
-using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
+using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus, sigmoid
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
 using Statistics: mean
@@ -229,15 +229,40 @@ end
 # Invariant point gate
 # --------------------
 
+struct MultiHeadGate{A <: AbstractMatrix, B <: AbstractVector, F <: Function}
+    W::A
+    b::B
+    σ::F
+end
+
+Flux.@layer MultiHeadGate
+
+function MultiHeadGate(n_heads::Integer, d::Integer, σ::Function = sigmoid)
+    W = randn(Float32, n_heads, d)
+    b = zeros(Float32, n_heads)
+    MultiHeadGate(W, b, σ)
+end
+
+function (gate::MultiHeadGate)(x::AbstractArray{T, 3}) where T
+    (; W, b, σ) = gate
+    @assert size(x, 1) == size(W, 1)
+    @assert size(x, 2) == size(W, 2)
+    σ.(sumdrop(W .* x .+ b, dims = 2))
+end
+
 struct InvariantPointGate
     # hyperparameters
     n_heads::Int
     c::Int
+    d::Int
     n_point_values::Int
 
     # trainable layers
+    map_nodes::Dense
     map_points::Dense
+    map_pairs::Dense
     map_final::Dense
+    gate::MultiHeadGate
 end
 
 Flux.@layer InvariantPointGate
@@ -247,17 +272,26 @@ function InvariantPointGate(
     n_dims_z::Integer;
     n_heads::Integer = 12,
     c::Integer = 6,
-    n_point_values::Integer = 8
+    d::Integer = 8,
+    n_point_values::Integer = 8,
+    gate::Function = sigmoid,
 )
     init = Flux.kaiming_uniform(gain = 1.0)
+    map_nodes = Dense(n_dims_s => n_heads * c; bias = false, init)
     map_points = Dense(n_dims_s => 3 * n_heads * n_point_values; bias = false, init)
+    map_pairs = Dense(n_dims_z => n_heads * d; bias = false, init)
     map_final = Dense(n_heads * n_point_values * 3 => n_dims_s; bias = true, init)
+    gate = MultiHeadGate(n_heads, 2c + d, gate)
     InvariantPointGate(
         n_heads,
         c,
+        d,
         n_point_values,
+        map_nodes,
         map_points,
+        map_pairs,
         map_final,
+        gate,
     )
 end
 
@@ -267,14 +301,17 @@ function (ipg::InvariantPointGate)(
     z::AbstractMatrix,
     rigid::RigidTransformation
 )
-    (; n_heads, c, n_point_values) = ipg
+    (; n_heads, c, d, n_point_values, gate) = ipg
+    nodes = reshape(ipg.map_nodes(s), n_heads, c, :)
     points = transform(rigid, reshape(ipg.map_points(s), 3, n_heads, n_point_values, :))
+    pairs = reshape(ipg.map_pairs(z), n_heads, d, :)
     function message(xi, xj, e)
-        # TODO: some gating here
-        xj
+        # head × (2c + d) × edge
+        x = cat(xi.nodes, xj.nodes, e, dims = 2)
+        reshape(gate(x), (1, n_heads, 1, :)) .* xj.points
     end
-    xi = xj = points
-    e = nothing
+    xi = xj = (; nodes, points)
+    e = pairs
     msgs = apply_edges(message, g; xi, xj, e)
     out_points = inverse_transform(rigid, aggregate_neighbors(g, mean, msgs))
     ipg.map_final(flatten(out_points))
