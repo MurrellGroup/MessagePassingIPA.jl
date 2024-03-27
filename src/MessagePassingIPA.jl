@@ -237,8 +237,8 @@ end
 
 Flux.@layer MultiHeadGate
 
-function MultiHeadGate(n_heads::Integer, d::Integer, σ::Function = sigmoid)
-    W = randn(Float32, n_heads, d)
+function MultiHeadGate(d::Integer, n_heads::Integer, σ::Function = sigmoid)
+    W = randn(Float32, d, n_heads)
     b = zeros(Float32, n_heads)
     MultiHeadGate(W, b, σ)
 end
@@ -247,7 +247,7 @@ function (gate::MultiHeadGate)(x::AbstractArray{T, 3}) where T
     (; W, b, σ) = gate
     @assert size(x, 1) == size(W, 1)
     @assert size(x, 2) == size(W, 2)
-    σ.(sumdrop(W .* x .+ b, dims = 2))
+    σ.(sumdrop(W .* x .+ b', dims = 1))
 end
 
 struct InvariantPointGate
@@ -281,7 +281,7 @@ function InvariantPointGate(
     map_points = Dense(n_dims_s => 3 * n_heads * n_point_values; bias = false, init)
     map_pairs = Dense(n_dims_z => n_heads * d; bias = false, init)
     map_final = Dense(n_heads * n_point_values * 3 => n_dims_s; bias = true, init)
-    gate = MultiHeadGate(n_heads, 2c + d, gate)
+    gate = MultiHeadGate(2c + d + 3n_point_values, n_heads, gate)
     InvariantPointGate(
         n_heads,
         c,
@@ -302,18 +302,21 @@ function (ipg::InvariantPointGate)(
     rigid::RigidTransformation
 )
     (; n_heads, c, d, n_point_values, gate) = ipg
-    nodes = reshape(ipg.map_nodes(s), n_heads, c, :)
-    points = transform(rigid, reshape(ipg.map_points(s), 3, n_heads, n_point_values, :))
-    pairs = reshape(ipg.map_pairs(z), n_heads, d, :)
+    nodes = reshape(ipg.map_nodes(s), c, n_heads, :)
+    points = transform(rigid, reshape(ipg.map_points(s), 3, n_point_values, n_heads, :))
+    pairs = reshape(ipg.map_pairs(z), d, n_heads, :)
     function message(xi, xj, e)
-        # head × (2c + d) × edge
-        x = cat(xi.nodes, xj.nodes, e, dims = 2)
-        reshape(gate(x), (1, n_heads, 1, :)) .* xj.points
+        # transform xj points to the local frames of xi
+        rigid = RigidTransformation(xi.rotations, xi.translations)
+        points = inverse_transform(rigid, xj.points)
+        # (2c + d + 3n_point_values) × head × edge
+        x = vcat(xi.nodes, xj.nodes, e, reshape(points, 3 * n_point_values, n_heads, :))
+        reshape(gate(x), 1, 1, n_heads, :) .* points
     end
-    xi = xj = (; nodes, points)
+    xi = xj = (; nodes, points, rotations = rigid.rotations, translations = rigid.translations)
     e = pairs
     msgs = apply_edges(message, g; xi, xj, e)
-    out_points = inverse_transform(rigid, aggregate_neighbors(g, mean, msgs))
+    out_points = aggregate_neighbors(g, +, msgs)
     ipg.map_final(flatten(out_points))
 end
 
