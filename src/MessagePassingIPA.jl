@@ -229,6 +229,8 @@ end
 # --------------------
 
 struct MultiHeadGate{A <: AbstractMatrix, B <: AbstractVector, F <: Function}
+    U::A
+    V::A
     W::A
     b::B
     σ::F
@@ -236,30 +238,32 @@ end
 
 Flux.@layer MultiHeadGate
 
-function MultiHeadGate(d::Integer, n_heads::Integer, σ::Function = sigmoid)
-    W = randn(Float32, d, n_heads)
+function MultiHeadGate(
+    n_dims_x::Integer,
+    n_dims_z::Integer,
+    n_heads::Integer,
+    σ::Function,
+)
+    init = Flux.kaiming_normal()
+    U = init(n_heads, n_dims_x)
+    V = init(n_heads, n_dims_x)
+    W = init(n_heads, n_dims_z)
     b = zeros(Float32, n_heads)
-    MultiHeadGate(W, b, σ)
+    MultiHeadGate(U, V, W, b, σ)
 end
 
-function (gate::MultiHeadGate)(x::AbstractArray{T, 3}) where T
-    (; W, b, σ) = gate
-    @assert size(x, 1) == size(W, 1)
-    @assert size(x, 2) == size(W, 2)
-    σ.(sumdrop(W .* x .+ b', dims = 1))
+function (gate::MultiHeadGate)(si, sj, zij)
+    (; U, V, W, b, σ) = gate
+    σ.(U*si .+ V*sj .+ W*zij .+ b)
 end
 
 struct InvariantPointGate
     # hyperparameters
     n_heads::Int
-    c::Int
-    d::Int
     n_point_values::Int
 
     # trainable layers
-    map_nodes::Dense
     map_points::Dense
-    map_pairs::Dense
     map_final::Dense
     gate::MultiHeadGate
 end
@@ -269,26 +273,18 @@ Flux.@layer InvariantPointGate
 function InvariantPointGate(
     n_dims_s::Integer,
     n_dims_z::Integer;
-    n_heads::Integer = 12,
-    c::Integer = 6,
-    d::Integer = 8,
-    n_point_values::Integer = 8,
-    gate::Function = sigmoid,
+    n_heads::Integer = 24,
+    n_point_values::Integer = 14,
+    σ::Function = sigmoid,
 )
     init = Flux.kaiming_uniform(gain = 1.0)
-    map_nodes = Dense(n_dims_s => n_heads * c; bias = false, init)
-    map_points = Dense(n_dims_s => 3 * n_heads * n_point_values; bias = false, init)
-    map_pairs = Dense(n_dims_z => n_heads * d; bias = false, init)
-    map_final = Dense(n_heads * n_point_values * 3 => n_dims_s; bias = true, init)
-    gate = MultiHeadGate(2c + d + 3n_point_values, n_heads, gate)
+    map_points = Dense(n_dims_s => 3 * n_point_values * n_heads; bias = false, init)
+    map_final = Dense(3 * n_point_values * n_heads => n_dims_s; bias = true, init)
+    gate = MultiHeadGate(n_dims_s, n_dims_z, n_heads, σ)
     InvariantPointGate(
         n_heads,
-        c,
-        d,
         n_point_values,
-        map_nodes,
         map_points,
-        map_pairs,
         map_final,
         gate,
     )
@@ -300,21 +296,16 @@ function (ipg::InvariantPointGate)(
     z::AbstractMatrix,
     rigid::RigidTransformation
 )
-    (; n_heads, c, d, n_point_values, gate) = ipg
-    nodes = reshape(ipg.map_nodes(s), c, n_heads, :)
+    (; n_heads, n_point_values, gate) = ipg
     points = transform(rigid, reshape(ipg.map_points(s), 3, n_point_values, n_heads, :))
-    pairs = reshape(ipg.map_pairs(z), d, n_heads, :)
-    function message(xi, xj, e)
+    function message(xi, xj, zij)
         # transform xj points to the local frames of xi
         rigid = RigidTransformation(xi.rotations, xi.translations)
         points = inverse_transform(rigid, xj.points)
-        # (2c + d + 3n_point_values) × head × edge
-        x = vcat(xi.nodes, xj.nodes, e, reshape(points, 3 * n_point_values, n_heads, :))
-        reshape(gate(x), 1, 1, n_heads, :) .* points
+        reshape(gate(xi.s, xj.s, zij), 1, 1, n_heads, :) .* points
     end
-    xi = xj = (; nodes, points, rotations = rigid.rotations, translations = rigid.translations)
-    e = pairs
-    msgs = apply_edges(message, g; xi, xj, e)
+    xi = xj = (; s, points, rotations = rigid.rotations, translations = rigid.translations)
+    msgs = apply_edges(message, g; xi, xj, e = z)
     out_points = aggregate_neighbors(g, +, msgs)
     ipg.map_final(flatten(out_points))
 end
