@@ -3,7 +3,6 @@ module MessagePassingIPA
 using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus, sigmoid
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
-using Statistics: mean
 
 # Algorithm 21 (x1: N, x2: Ca, x3: C)
 function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::AbstractVector)
