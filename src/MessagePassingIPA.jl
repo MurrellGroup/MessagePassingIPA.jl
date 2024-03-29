@@ -80,7 +80,8 @@ Apply inverse transformation `rigid` to `y`.
 """
 inverse_transform(rigid::RigidTransformation{T}, y::AbstractArray{T,3}) where {T} =
     batched_mul(
-        batched_transpose(rigid.rotations),
+        # batched_transpose(rigid.rotations) is sometimes indifferentiable on GPU
+        permutedims(rigid.rotations, (2, 1, 3)),
         y .- unsqueeze(rigid.translations, dims=2),
     )
 
@@ -300,13 +301,13 @@ function (ipg::InvariantPointGate)(
     points = transform(rigid, reshape(ipg.map_points(s), 3, n_point_values, n_heads, :))
     function message(xi, xj, zij)
         # transform xj points to the local frames of xi
-        rigid = RigidTransformation(xi.rotations, xi.translations)
-        points = inverse_transform(rigid, xj.points)
-        reshape(gate(xi.s, xj.s, zij), 1, 1, n_heads, :) .* points
+        let rigid = RigidTransformation(xi.rotations, xi.translations)
+            (gate = gate(xi.s, xj.s, zij), points = inverse_transform(rigid, xj.points))
+        end
     end
     xi = xj = (; s, points, rotations = rigid.rotations, translations = rigid.translations)
     msgs = apply_edges(message, g; xi, xj, e = z)
-    out_points = aggregate_neighbors(g, +, msgs)
+    out_points = aggregate_neighbors(g, +, reshape(msgs.gate, 1, 1, n_heads, :) .* msgs.points)
     ipg.map_final(flatten(out_points))
 end
 
