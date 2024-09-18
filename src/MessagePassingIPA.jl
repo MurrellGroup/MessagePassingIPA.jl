@@ -3,6 +3,7 @@ module MessagePassingIPA
 using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
+using BatchedTransformations
 
 # Algorithm 21 (x1: N, x2: Ca, x3: C)
 function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::AbstractVector)
@@ -13,7 +14,7 @@ function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::Abstract
     e2 = normalize(u2)
     e3 = e1 × e2
     R = [e1 e2 e3]
-    t = x2
+    t = reshape(x2, 3, 1)
     return R, t
 end
 
@@ -31,69 +32,14 @@ function rigid_from_3points(x1::AbstractMatrix, x2::AbstractMatrix, x3::Abstract
     R[:, 1, :] = e1
     R[:, 2, :] = e2
     R[:, 3, :] = e3
-    t = x2
+    t = reshape(x2, 3, 1, :)
     return R, t
 end
 
-
-# Rigid transformation
-# --------------------
-
-# N: number of residues
-struct RigidTransformation{T,A<:AbstractArray{T,3},B<:AbstractArray{T,2}}
-    rotations::A     # (3, 3, N)
-    translations::B  # (3, N)
+function rigid_from_3points(::Type{Rigid}, args...)
+    R, t = rigid_from_3points(args...)
+    Translation(t) ∘ Rotation(R)
 end
-
-"""
-    RigidTransformation(rotations, translations)
-
-Create a sequence of rigid transformations.
-
-# Arguments
-- `rotations`: 3×3xN array, `rotations[:,:,j]` represents a single rotation
-- `translations`: 3×N array, `translations[:,j]` represents a single translation
-"""
-RigidTransformation
-
-Flux.@functor RigidTransformation
-
-# x: (3, ?, N)
-"""
-    transform(rigid::RigidTransformation, x::AbstractArray)
-
-Apply transformation `rigid` to `x`.
-"""
-transform(rigid::RigidTransformation{T}, x::AbstractArray{T,3}) where {T} =
-    batched_mul(rigid.rotations, x) .+ unsqueeze(rigid.translations, dims=2)
-
-# y: (3, ?, N)
-"""
-    inverse_transform(rigid::RigidTransformation, y::AbstractArray)
-
-Apply inverse transformation `rigid` to `y`.
-"""
-inverse_transform(rigid::RigidTransformation{T}, y::AbstractArray{T,3}) where {T} =
-    batched_mul(
-        batched_transpose(rigid.rotations),
-        y .- unsqueeze(rigid.translations, dims=2),
-    )
-
-"""
-    compose(rigid1::RigidTransformation, rigid2::RigidTransformation)
-
-Compose two rigid transformations.
-"""
-function compose(
-    rigid1::RigidTransformation{T},
-    rigid2::RigidTransformation{T},
-) where {T}
-    rotations = batched_mul(rigid1.rotations, rigid2.rotations)
-    translations =
-        batched_vec(rigid1.rotations, rigid2.translations) + rigid1.translations
-    return RigidTransformation(rotations, translations)
-end
-
 
 # Invariant point attention
 # -------------------------
@@ -164,7 +110,7 @@ function (ipa::InvariantPointAttention)(
     g::GNNGraph,
     s::AbstractMatrix,
     z::AbstractMatrix,
-    rigid::RigidTransformation,
+    rigid::Rigid,
 )
     F = eltype(s)
     n_residues = size(s, 2)
@@ -202,7 +148,7 @@ function (ipa::InvariantPointAttention)(
     γ = softplus.(ipa.header_weights_raw)
     function message(xi, xj, e)
         u = sumdrop(xi.nodes_q .* xj.nodes_k, dims=2)  # inner products
-        v = sumdrop(abs2.(xi.points_q .- xj.points_k), dims=(1, 3))  # sum of squared distances
+        v = sumdrop(abs2, xi.points_q .- xj.points_k, dims=(1, 3))  # sum of squared distances
         attn_logits = @. w_L * (1 / √$(F(c)) * u + e - γ * w_C / 2 * v)  # logits of attention scores
         return (; attn_logits, nodes_v=xj.nodes_v, points_v=xj.points_v)
     end
@@ -217,13 +163,14 @@ function (ipa::InvariantPointAttention)(
     out_nodes = aggregate_neighbors(g, +, reshape(attn, n_heads, 1, :) .* msgs.nodes_v)
     out_points = aggregate_neighbors(g, +, reshape(attn, 1, n_heads, 1, :) .* msgs.points_v)
     out_points = inverse_transform(rigid, reshape(out_points, 3, :, n_residues))
-    out_points_norm = sqrt.(sumdrop(abs2.(out_points), dims=1))
+    out_points_norm = sqrt.(sumdrop(abs2, out_points, dims=1))
 
     # return the final output
     out = vcat(flatten.((out_pairs, out_nodes, out_points, out_points_norm))...)
     return ipa.map_final(out)
 end
 
-sumdrop(x; dims) = dropdims(sum(x; dims); dims)
+sumdrop(f, x; dims) = dropdims(sum(f, x; dims); dims)
+sumdrop(x; dims) = sumdrop(identity, x; dims)
 
 end
