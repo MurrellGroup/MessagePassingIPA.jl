@@ -1,31 +1,25 @@
-using MessagePassingIPA: RigidTransformation, InvariantPointAttention, transform, inverse_transform, compose, rigid_from_3points
+using MessagePassingIPA: InvariantPointAttention, rigid_from_3points
 using GraphNeuralNetworks: rand_graph
-using Rotations: RotMatrix
+using BatchedTransformations
 using Test
 
 @testset "MessagePassingIPA.jl" begin
     @testset "RigidTransformation" begin
         n = 100
-        rotations = stack(rand(RotMatrix{3,Float32}) for _ in 1:n)
-        translations = randn(Float32, 3, n)
-        rigid = RigidTransformation(rotations, translations)
+        rigid = rand(Float32, Rigid, 3, (n,))
         x = randn(Float32, 3, 12, n)
-        y = transform(rigid, x)
+        y = rigid * x
         @test size(x) == size(y)
-        @test x ≈ inverse_transform(rigid, y)
+        @test x ≈ inverse(rigid) * y
 
         n = 100
-        rigid1 =
-            RigidTransformation(stack(rand(RotMatrix{3,Float32})
-                                      for _ in 1:n), randn(Float32, 3, n))
-        rigid2 =
-            RigidTransformation(stack(rand(RotMatrix{3,Float32})
-                                      for _ in 1:n), randn(Float32, 3, n))
-        rigid12 = compose(rigid1, rigid2)
+        rigid1 = rand(Float32, Rigid, 3, (n,))
+        rigid2 = rand(Float32, Rigid, 3, (n,))
+        rigid12 = rigid1 ∘ rigid2
         x = randn(Float32, 3, 12, n)
-        @test transform(rigid12, x) ≈ transform(rigid1, transform(rigid2, x))
-        y = transform(rigid12, x)
-        @test x ≈ inverse_transform(rigid2, inverse_transform(rigid1, y))
+        @test rigid12 * x ≈ rigid1 * (rigid2 * x)
+        y = rigid12 * x
+        @test x ≈ inverse(rigid2) * (inverse(rigid1) * y)
     end
 
     @testset "InvariantPointAttention" begin
@@ -44,16 +38,16 @@ using Test
         x1 = c .+ randn(Float32, 3, n_nodes)
         x2 = c .+ randn(Float32, 3, n_nodes)
         x3 = c .+ randn(Float32, 3, n_nodes)
-        rigid1 = RigidTransformation(rigid_from_3points(x1, x2, x3)...)
+        rigid1 = rigid_from_3points(Rigid, x1, x2, x3)
         @test ipa(g, s, z, rigid1) isa Matrix{Float32}
         @test size(ipa(g, s, z, rigid1)) == (n_dims_s, n_nodes)
 
         # check invariance
-        R, t = rand(RotMatrix{3,Float32}), randn(Float32, 3)
+        R, t = values(rand(Float32, Rotation, 3)), randn(Float32, 3, 1)
         x1 = R * x1 .+ t
         x2 = R * x2 .+ t
         x3 = R * x3 .+ t
-        rigid2 = RigidTransformation(rigid_from_3points(x1, x2, x3)...)
+        rigid2 = rigid_from_3points(Rigid, x1, x2, x3)
         @test ipa(g, s, z, rigid1) ≈ ipa(g, s, z, rigid2)
     end
 end
