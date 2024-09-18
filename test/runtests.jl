@@ -1,4 +1,4 @@
-using MessagePassingIPA: InvariantPointAttention, rigid_from_3points
+using MessagePassingIPA: RigidTransformation, InvariantPointAttention, rigid_from_3points
 using GraphNeuralNetworks: rand_graph
 using BatchedTransformations
 using Test
@@ -38,16 +38,16 @@ using Test
         x1 = c .+ randn(Float32, 3, n_nodes)
         x2 = c .+ randn(Float32, 3, n_nodes)
         x3 = c .+ randn(Float32, 3, n_nodes)
-        rigid1 = rigid_from_3points(Rigid, x1, x2, x3)
+        rigid1 = RigidTransformation(rigid_from_3points(x1, x2, x3)...)
         @test ipa(g, s, z, rigid1) isa Matrix{Float32}
         @test size(ipa(g, s, z, rigid1)) == (n_dims_s, n_nodes)
 
         # check invariance
-        R, t = values(rand(Float32, Rotation, 3)), randn(Float32, 3, 1)
+        R, t = values(rand(Float32, Rotation, 3)), randn(Float32, 3)
         x1 = R * x1 .+ t
         x2 = R * x2 .+ t
         x3 = R * x3 .+ t
-        rigid2 = rigid_from_3points(Rigid, x1, x2, x3)
+        rigid2 = RigidTransformation(rigid_from_3points(x1, x2, x3)...)
         @test ipa(g, s, z, rigid1) ≈ ipa(g, s, z, rigid2)
     end
 end

@@ -36,10 +36,11 @@ function rigid_from_3points(x1::AbstractMatrix, x2::AbstractMatrix, x3::Abstract
     return R, t
 end
 
-function rigid_from_3points(::Type{Rigid}, args...)
-    R, t = rigid_from_3points(args...)
+function RigidTransformation(R::AbstractArray{T,3}, t::AbstractArray{T,3}) where T<:Real
     Translation(t) ∘ Rotation(R)
 end
+
+RigidTransformation(R, t::AbstractMatrix) = RigidTransformation(R, reshape(t, 3, 1, :))
 
 # Invariant point attention
 # -------------------------
