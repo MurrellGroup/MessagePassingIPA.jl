@@ -1,7 +1,7 @@
 name = "MessagePassingIPA"
 uuid = "ae93bb3c-0630-4e85-811e-b7d91ad6ecbd"
 authors = ["Kenta Sato <bicycle1885@gmail.com> and contributors"]
-version = "0.0.3"
+version = "0.0.4"
 
 [deps]
 BatchedTransformations = "8ba27c4b-52b5-4b10-bc66-a4fda05aa11b"
@@ -10,7 +10,7 @@ GraphNeuralNetworks = "cffab07f-9bc2-4db1-8861-388f63bf7694"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
 [compat]
-BatchedTransformations = "0.5"
+BatchedTransformations = "0.5.7"
 Flux = "0.13.17, 0.14, 0.15, 0.16"
 GraphNeuralNetworks = "0.6, 1"
 LinearAlgebra = "1"
