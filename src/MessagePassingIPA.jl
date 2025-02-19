@@ -60,7 +60,7 @@ struct InvariantPointAttention
     header_weights_raw::Any
 end
 
-Flux.@functor InvariantPointAttention
+Flux.@layer InvariantPointAttention
 
 """
     InvariantPointAttention(
