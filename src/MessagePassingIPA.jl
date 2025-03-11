@@ -1,9 +1,9 @@
 module MessagePassingIPA
 
-using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
+using Flux: Flux, Dense, flatten, unsqueeze, softplus
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize
-using BatchedTransformations
+using BatchedTransformations: Translation, Rotation, Rigid, transform, inverse_transform
 
 # Algorithm 21 (x1: N, x2: Ca, x3: C)
 function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::AbstractVector)
