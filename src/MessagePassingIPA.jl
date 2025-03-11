@@ -1,9 +1,10 @@
 module MessagePassingIPA
 
-using Flux: Flux, Dense, flatten, unsqueeze, chunk, batched_mul, batched_vec, batched_transpose, softplus
+using Flux: Flux, Dense, flatten, unsqueeze, softplus
 using GraphNeuralNetworks: GNNGraph, apply_edges, softmax_edge_neighbors, aggregate_neighbors
 using LinearAlgebra: normalize, ×
-using BatchedTransformations
+using BatchedTransformations: Translation, Rotation, Rigid, transform, inverse_transform
+
 
 # Algorithm 21 (x1: N, x2: Ca, x3: C)
 function rigid_from_3points(x1::AbstractVector, x2::AbstractVector, x3::AbstractVector)
@@ -53,8 +54,8 @@ struct InvariantPointAttention
     n_point_values::Int
 
     # trainable layers and weights
-    map_nodes::Dense
-    map_points::Dense
+    map_nodes::NamedTuple
+    map_points::NamedTuple
     map_pairs::Dense
     map_final::Dense
     header_weights_raw::Any
@@ -83,11 +84,15 @@ function InvariantPointAttention(
     # initialize layer weights so that outputs have std = 1 (as assumed in
     # AlphaFold2) if inputs follow the standard normal distribution
     init = Flux.kaiming_uniform(gain=1.0)
-    map_nodes = Dense(n_dims_s => n_heads * c * 3, bias=false; init)
-    map_points = Dense(
-        n_dims_s => n_heads * (n_query_points * 2 + n_point_values) * 3,
-        bias=false;
-        init
+    map_nodes = (
+        q = Dense(n_dims_s => n_heads * c, bias=false; init),
+        k = Dense(n_dims_s => n_heads * c, bias=false; init),
+        v = Dense(n_dims_s => n_heads * c, bias=false; init),
+    )
+    map_points = (
+        q = Dense(n_dims_s => n_heads * n_query_points * 3, bias=false; init),
+        k = Dense(n_dims_s => n_heads * n_query_points * 3, bias=false; init),
+        v = Dense(n_dims_s => n_heads * n_point_values * 3, bias=false; init),
     )
     map_pairs = Dense(n_dims_z => n_heads, bias=false; init)
     map_final =
@@ -118,30 +123,13 @@ function (ipa::InvariantPointAttention)(
     (; n_heads, c, n_query_points, n_point_values) = ipa
 
     # map inputs (residues come at the last dimension)
-    nodes = reshape(ipa.map_nodes(s), n_heads, :, n_residues)
-    points = transform(rigid, reshape(ipa.map_points(s), 3, :, n_residues))
+    nodes_q = reshape(ipa.map_nodes.q(s), n_heads, c, n_residues)
+    nodes_k = reshape(ipa.map_nodes.k(s), n_heads, c, n_residues)
+    nodes_v = reshape(ipa.map_nodes.v(s), n_heads, c, n_residues)
+    points_q = reshape(transform(rigid, reshape(ipa.map_points.q(s), 3, :, n_residues)), 3, n_heads, n_query_points, n_residues)
+    points_k = reshape(transform(rigid, reshape(ipa.map_points.k(s), 3, :, n_residues)), 3, n_heads, n_query_points, n_residues)
+    points_v = reshape(transform(rigid, reshape(ipa.map_points.v(s), 3, :, n_residues)), 3, n_heads, n_point_values, n_residues)
     bias = ipa.map_pairs(z)
-
-    # split into queries, keys and values
-    # NOTE: workaround to avoid bugs associated with the chunk function
-    #nodes_q, nodes_k, nodes_v = chunk(nodes, size=[c, c, c], dims=2)
-    i = firstindex(nodes, 2)
-    nodes_q = nodes[:,i:i+c-1,:]; i += size(nodes_q, 2)
-    nodes_k = nodes[:,i:i+c-1,:]; i += size(nodes_k, 2)
-    nodes_v = nodes[:,i:i+c-1,:]
-    #points_q, points_k, points_v = chunk(
-    #    points,
-    #    size=n_heads * [n_query_points, n_query_points, n_point_values],
-    #    dims=2,
-    #)
-    i = firstindex(points, 2)
-    points_q = points[:,i:i+n_heads*n_query_points-1,:]; i += size(points_q, 2)
-    points_k = points[:,i:i+n_heads*n_query_points-1,:]; i += size(points_k, 2)
-    points_v = points[:,i:i+n_heads*n_point_values-1,:]
-
-    points_q = reshape(points_q, 3, n_heads, :, n_residues)
-    points_k = reshape(points_k, 3, n_heads, :, n_residues)
-    points_v = reshape(points_v, 3, n_heads, :, n_residues)
 
     # run message passing
     w_C = F(√(2 / 9n_query_points))
