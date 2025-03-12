@@ -1,7 +1,7 @@
 name = "MessagePassingIPA"
 uuid = "ae93bb3c-0630-4e85-811e-b7d91ad6ecbd"
 authors = ["Kenta Sato <bicycle1885@gmail.com> and contributors"]
-version = "0.0.4"
+version = "0.1.0"
 
 [deps]
 BatchedTransformations = "8ba27c4b-52b5-4b10-bc66-a4fda05aa11b"
